@@ -1,0 +1,17 @@
+data/
+.venv/
+__pycache__/
+*.pyc
+.env
+*.key
+*.pem
+*.sqlite3*
+
+# Private notes, raw transcripts and unreviewed screenshots
+跑步训练计划.md
+聊天记录*
+gui-验收截图/
+.env.*
+*.pfx
+*.p12
+*.zip

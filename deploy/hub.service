@@ -1,0 +1,22 @@
+[Unit]
+Description=LONGS Private Hub
+After=network.target
+
+[Service]
+Type=simple
+User=private-hub
+Group=private-hub
+WorkingDirectory=/opt/private-hub/app
+EnvironmentFile=/etc/private-hub.env
+ExecStart=/opt/private-hub/venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8765 --workers 1 --ws-max-size 65536 --no-access-log
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/private-hub
+
+[Install]
+WantedBy=multi-user.target

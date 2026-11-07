@@ -1,0 +1,32 @@
+# Merge into the EXISTING TLS virtual host after backup; do not blindly replace nginx.conf.
+# Replace hub.example.com and certificate paths. IP TLS requires a trusted IP-SAN certificate.
+# Port 80 only redirects; never enter passwords over plain HTTP.
+server {
+    listen 80;
+    server_name hub.example.com;
+    return 308 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name hub.example.com;
+    ssl_certificate /etc/letsencrypt/live/hub.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/hub.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 1024m;
+    client_body_timeout 300s;
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 120s;
+        proxy_send_timeout 300s;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        # Do not trust X-Forwarded-For supplied by public clients.
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
