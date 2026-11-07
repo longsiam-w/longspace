@@ -30,7 +30,7 @@ $env:HUB_ORIGIN='http://127.0.0.1:8765'
 - 文件随机对象名、AES-256-GCM 每块随机 nonce、AAD 绑定文件和块序号，认证尾部检测截断。文件名、目录名、大小不加密；文件内容在服务器可解密（非零知识网盘）。
 - data/master.key 是服务器存储主密钥。限制整个数据目录权限 0700、密钥 0600。备份时密钥应与数据分开加密保存；丢失密钥无法恢复。获得服务器 root 的攻击者仍能解密存储。没有自动密钥轮换；轮换需离线迁移。
 - 文件默认 1 GiB 上限、全库 20 GiB 配额；不做覆盖写入；仅空文件夹可删除。没有回收站、在线预览或断点续传。
-- 消息为每接收方最多 10 条 FIFO 双端队列，尾入、头部淘汰；未确认消息即使在线也计入容量。成功 ACK 后删除。超过十条会丢最旧消息，send 响应返回 evicted。每软件每分钟最多发送 120 次。业务如不能丢消息，应自行实现可靠任务存储。
+- 消息为每接收方最多 10 条待 ACK 的 FIFO 队列；满时返回 HTTP 409，不淘汰旧消息。支持 clientMessageId 幂等发送，ACK 后收据保留 7 天，每发送方最多 10000 条；每软件每分钟最多发送 120 次。接入业务仍须持久化 outbox/inbox 与去重，不承诺全局 exactly-once。
 - 消息正文加密落盘，软件 token 仅存 SHA-256 摘要；SDK 提供可选 AES-GCM 端到端加密。建议敏感消息强制使用 E2E 并通过独立渠道分发每对软件密钥。服务器仍见发收编号、时间与大小。
 - ACK/删除是逻辑删除，不是 SSD、快照、云备份上的物理安全擦除。SQLite secure_delete=ON，每分钟 WAL TRUNCATE；数据库空闲页、WAL、备份可能短期包含密文。不要给消息库做长期历史备份，需恢复文件时可离线备份并排除队列表。
 - 最近 100 条事件仅保存在内存，无消息正文；统计自启动计数，吞吐图是最近100条事件的有限采样而非完整监控。默认禁用 uvicorn access log，代理默认日志不含请求正文；不要开启调试正文日志。
@@ -57,7 +57,7 @@ sudo install -d -m 755 /opt/private-hub/app
 sudo install -d -m 700 -o private-hub -g private-hub /var/lib/private-hub
 sudo python3 -m venv /opt/private-hub/venv
 ```
-通过 scp 将 server.py、manage.py、requirements.txt、web/、integration/ 和 deploy/ 上传到 `/opt/private-hub/app`（先传普通用户目录再 sudo 安装），不要上传 data、测试临时库或私钥。
+通过 scp 将 server.py、relay_attachments.py、manage.py、requirements.txt、web/、integration/ 和 deploy/ 上传到 `/opt/private-hub/app`（先传普通用户目录再 sudo 安装），不要上传 data、测试临时库或私钥。
 ```
 sudo /opt/private-hub/venv/bin/pip install -r /opt/private-hub/app/requirements.txt
 sudo -u private-hub env HUB_DATA=/var/lib/private-hub /opt/private-hub/venv/bin/python /opt/private-hub/app/manage.py init
@@ -80,3 +80,11 @@ curl http://127.0.0.1:8765/api/health
 5. 参考 deploy/nginx.conf.example 只调整目标虚拟主机；先 `sudo nginx -t`，再 `sudo systemctl reload nginx`。不停止整台服务器，不改无关主机。防火墙只放行需要的 22/80/443，8765 仅绑定本地。
 6. 验收：旧测试首页不再出现；门户链接、HTTPS 锁、登录/退出、文件上传下载、WS 断线补收、十条溢出、注销客户端、服务重启积压仍在。跨设备实际验证才算部署完成。
 7. 回滚：恢复备份的目标 Nginx 虚拟主机并 nginx -t/reload；必要时 stop private-hub。保留 /var/lib/private-hub 不丢文件。不会提供无条件覆盖现有网站的一键脚本。
+
+## 更新现有部署
+
+在项目目录运行 `powershell -ExecutionPolicy Bypass -File .\deploy\Update-Ui.ps1`，输入 UPDATE，SSH 密码仅在终端输入。先暂停上传和通信任务，并配套备份数据库与主密钥。更新器备份应用文件、更新代码和资源、校验页面正文；应用代码变化时重启服务，旧登录失效。失败会尝试恢复应用文件，不修改密码、Nginx、TLS 或环境配置。部署脚本包含原站点默认配置，复用前须核对目标主机。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。第三方依赖仍遵循各自许可证。

@@ -15,3 +15,9 @@ gui-验收截图/
 *.pfx
 *.p12
 *.zip
+
+# Local development notes and evidence are not part of the source distribution
+/evidence/
+/*.md
+!/README.md
+/deploy/UI-UPDATE.md
