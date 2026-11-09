@@ -61,3 +61,5 @@ pre{overflow:auto;padding:18px;background:var(--bg);border:1px solid var(--line)
 
 .token-mask{display:block;margin-top:8px;font-size:14px;overflow-wrap:anywhere}.software-actions{display:flex;flex-wrap:wrap;gap:8px}.software-actions button{min-height:42px}#secret{font:16px/1.8 Consolas,monospace;resize:none;overflow-wrap:anywhere;margin-top:10px}.record>div:first-child{min-width:0}#copy-token-status{min-height:24px}
 @media(max-width:750px){.software-actions{width:100%}.software-actions button{flex:1;min-height:44px;font-size:14px}#credential .dialog-actions{flex-wrap:wrap}#credential .dialog-actions button{flex:1;white-space:nowrap}}
+
+.chart-times{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px;margin-top:8px}.event-software{font-weight:600;margin:5px 0}.record>div{min-width:0;overflow-wrap:anywhere}.record code{overflow-wrap:anywhere}

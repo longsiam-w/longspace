@@ -51,7 +51,7 @@ def main():
                 device=page.request.get('http://127.0.0.1:18765/api/software').json()['software'][0]
                 response=page.request.post('http://127.0.0.1:18765/api/messages',headers={'Authorization':'Bearer '+old_token},data={'recipient':device['id'],'body':'dashboard tiny probe'})
                 assert response.ok
-                page.evaluate('refreshDashboard()'); page.locator('#events').get_by_text('relay 测试设备 ('+device['id']+') → 测试设备 ('+device['id']+')',exact=True).wait_for()
+                page.evaluate('refreshDashboard()'); page.locator('#events').get_by_text('测试设备 → 测试设备',exact=True).wait_for(); assert device['id'] in page.locator('#events').inner_text(); assert '消息 ID：' in page.locator('#events').inner_text(); assert '近一分钟' not in page.locator('#dashboard').inner_text(); assert page.locator('#chart-start').inner_text()
                 assert '测试设备' in page.locator('#pending').inner_text()
                 page.set_viewport_size({'width':390,'height':844}); assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'); page.set_viewport_size({'width':1440,'height':1000})
                 page.get_by_text('测试设备',exact=True).wait_for(); page.get_by_text('*******************'+old_token[-3:],exact=True).wait_for(); page.get_by_role('button',name='重新分配 Token',exact=True).click(); page.locator('#confirm-accept').click(); page.locator('#credential').wait_for(state='visible'); new_token=page.locator('#secret').input_value(); assert len(new_token)==48 and new_token!=old_token; page.locator('#close-secret').click(); page.get_by_text('*******************'+new_token[-3:],exact=True).wait_for(); page.screenshot(path=str(Path(os.environ['TEMP'])/'hub-dashboard.png'),full_page=True)
