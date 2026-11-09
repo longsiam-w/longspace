@@ -229,6 +229,11 @@ def software_data():
 @app.get('/api/software')
 async def software(): return software_data()
 
+@app.get('/api/software/me')
+async def software_identity(request: Request):
+    """Resolve this software's identity from its Bearer token, not an admin cookie."""
+    return client(request)
+
 @app.post('/api/admin/software')
 async def register(request: Request):
     session(request)

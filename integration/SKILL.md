@@ -6,12 +6,26 @@ description: 接入 LONGS云消息转发，按 longs-app v1 区分数据、事�
 # LONGS云通信接入 Skill
 
 ## 使用前与安全边界
-1. 向用户确认 HTTPS baseURL、该软件自己的 ID 和 token，不得索取管理员密码或服务器主密钥，不把 token 写进源码、聊天、URL、日志、公共网页或 Git。单用户软件也应首次配置后存入系统凭据库，脚本可用环境变量或受保护的本地配置。
+1. 接入只需配置 HTTPS baseURL 和该软件的 token。启动时必须通过 `GET /api/software/me`（`Authorization: Bearer <token>`）获取自身 `{id,name}`，SDK 使用 `await client.me()`；不得要求用户手动提供自身软件 ID，不得凭名称或公开软件列表猜测自身身份。不要让用户在聊天粘贴 token；通过本机环境变量、系统凭据库或受保护配置读取。不得索取管理员密码或服务器主密钥，不把 token 写进源码、聊天、URL、日志、公共网页或 Git。
 2. 每台设备/独立实例分别登记。一个ID只有一个实时连接；不要同编号多进程抢连。Token重新分配使旧token失效，ID和待确认消息保留。
 3. 阅读 `/guide`、`/integration/README.md`、`/api/docs`。SDK `/integration/hub-sdk.mjs` 适用于现代浏览器/Node.js 22+；配套 `/integration/business-protocol.mjs` 必须一起保存，不能只下载SDK一个文件。
 4. 默认仅本地少量验证。未经明确授权不连接生产发消息、不压测、不读取管理员密码或真实截图。屏幕监听须用户主动开启，提供暂停、目标白名单及明显状态；不暗中截屏。
 
+## 启动时发现自身身份（必须实现）
+
+```js
+const client = new HubClient({baseURL, token, onMessage});
+const {id: selfId, name: selfName} = await client.me();
+// selfId 用于本地身份展示、E2E 身份绑定等，不要求用户填写。
+client.connect();
+```
+
+HTTP：`GET /api/software/me`，请求头 `Authorization: Bearer <token>`，成功仅返回 `{"id":"软件ID","name":"软件名"}`。不接受管理员 Cookie 代替软件 token，不返回 token 或其他软件身份。无凭据、无效/撤销 token 返回401，应停止接入并提示在本机更新凭据；404表示服务器尚未升级，不得静默改为按名字猜ID。网络错误可有限退避重试。该GET不读取、消费或ACK消息，也会刷新在线活动。
+
+自己的 ID 与接收方 ID 是两回事：自身身份从此接口获得；接收方从 `GET /api/software` 映射中选择，重名时按明确ID区分，不能默认选第一项。`/api/me` 是管理员会话接口，不是软件身份接口。发送时无需传 sender，服务端根据 token 确定。
+
 ## 转发层协议
+- `GET /api/software/me`：Bearer token 获取自己的 `{id,name}`，必须作为接入初始化步骤。
 - `GET /api/software`：公开软件ID/名称/version，不含token。软件名称避免隐私。
 - `POST /api/messages`：Bearer token；JSON `{recipient:"ID",clientMessageId:"持久化唯一标识",body:业务内容}`；整个请求最大65536字节，每发送软件每分钟最多120次。sender由token决定，正文自报sender不能用于授权。
 - 首次返回 `{id,queued:true,state:"queued",duplicate:false,clientMessageId,evicted:[]}` 仅表示持久入队。每接收方最多10条未ACK；满时409拒绝新增，不丢旧消息。发送方保留outbox并退避，不盲目紧循环。

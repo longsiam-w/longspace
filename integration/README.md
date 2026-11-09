@@ -14,7 +14,10 @@ SDK：原生 ES module，无 npm 依赖。Node 22+ 或现代浏览器。浏览�
 
 接口权鉴：管理员浏览器使用 HttpOnly、SameSite=Strict 会话 Cookie；消息 API 使用每个软件单独的 Bearer token。云U盘仅提供管理员网页登录操作，不复用软件凭据；避免一个接入软件就能下载全部私人文件。
 
+初始化时只需配置 baseURL 和软件 token，调用 `await client.me()` 或 `GET /api/software/me`（Authorization Bearer）获取自己的 `{id,name}`，不要让用户手动填写自身 ID，不按名称猜测。401时停止并更新凭据；404需先升级服务器。`/api/me` 属于管理员接口，不可混用。接收方 ID 则通过公开映射选择。
+
 主要接口：
+- `GET /api/software/me`：软件 Bearer token 查询自身 ID/名称，不返回凭据。
 - `GET /api/software`：公开软件映射。
 - `POST /api/messages`：`{recipient,body}`，成功返回 `{id,queued:true,evicted:[]}`。queued 表示已持久入队，不表示对端已处理。
 - `GET /api/messages`：读取自己全部待确认消息。

@@ -33,6 +33,7 @@ export class HubClient {
       if(!r.ok){const error=Error(data.detail||r.statusText);error.status=r.status;throw error}return data;
     }finally{clearTimeout(timeout)}
   }
+  async me(){return this.request('/software/me')}
   async software(){return this.request('/software')}
   // No automatic send retry: an ambiguous timeout may already have committed a message.
   async send(recipient,body,{clientMessageId=crypto.randomUUID()}={}){

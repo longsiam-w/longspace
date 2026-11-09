@@ -15,6 +15,9 @@ try{
   globalThis.WebSocket=FakeSocket;
   globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({ok:true,messages:[]})});
   const processed=[];client=new HubClient({baseURL:'https://local.invalid',token:'test-only',onMessage:async m=>{processed.push(m.id)},onError:()=>{throw Error('callback failure')}});
+  globalThis.fetch=async(url,options)=>{assert.equal(url,'https://local.invalid/api/software/me');assert.equal(options.headers.Authorization,'Bearer test-only');return {ok:true,status:200,json:async()=>({id:'self-test',name:'test software'})}};
+  assert.deepEqual(await client.me(),{id:'self-test',name:'test software'});
+  globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({ok:true,messages:[]})});
   client.connect().connect();assert.equal(FakeSocket.instances.length,1);
   const ws=FakeSocket.instances[0];ws.open();assert.equal(ws.last.type,'auth');
   ws.receive({type:'sync',messages:[{id:'one'}]});ws.receive({type:'sync',messages:[{id:'one'}]});await client.chain;assert.deepEqual(processed,['one']);
@@ -22,6 +25,7 @@ try{
   client.connect();assert.equal(FakeSocket.instances.length,2);client.close();
   // HTTP errors keep status, so revoked credentials can stop retry loops.
   globalThis.fetch=async()=>({ok:false,status:401,json:async()=>({detail:'invalid'})});
+  await assert.rejects(client.me(),e=>e.status===401);
   await assert.rejects(client.ack('one'),e=>e.status===401);
   await assert.rejects(client.send('recipient',{v:1},{clientMessageId:'persisted-key'}),e=>e.clientMessageId==='persisted-key');
   // Timeout really aborts, rather than just leaving an unresolved request behind.

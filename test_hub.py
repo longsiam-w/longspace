@@ -25,6 +25,25 @@ class HubTests(unittest.TestCase):
         self.assertEqual(c.post('/api/messages',json={}).status_code,401)
         self.assertEqual(self.c.post('/api/folders',json={'path':'x'},headers={'Origin':'https://evil.test'}).status_code,403)
         self.assertEqual(self.c.post('/api/login',json={'password':'wrong'}).status_code,401)
+    def test_01b_software_identity(self):
+        a=self.register('同名软件'); b=self.register('同名软件')
+        # Even an admin session cannot substitute for software credentials.
+        self.assertEqual(self.c.get('/api/software/me').status_code,401)
+        self.assertEqual(self.c.get('/api/software/me',headers={'Authorization':'Bearer invalid'}).status_code,401)
+        for who in (a,b):
+            response=self.c.get('/api/software/me',headers=self.hdr(who))
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json(),{'id':who['id'],'name':who['name']})
+        self.assertNotEqual(a['id'],b['id'])
+        before=self.c.get('/api/messages',headers=self.hdr(a)).json()
+        rotated=self.c.post('/api/admin/software/'+a['id']+'/token').json()
+        self.assertEqual(self.c.get('/api/software/me',headers=self.hdr(a)).status_code,401)
+        fresh={'Authorization':'Bearer '+rotated['token']}
+        self.assertEqual(self.c.get('/api/software/me',headers=fresh).json(),{'id':a['id'],'name':a['name']})
+        self.assertEqual(self.c.get('/api/messages',headers=fresh).json(),before)
+        self.c.delete('/api/admin/software/'+a['id'])
+        self.assertEqual(self.c.get('/api/software/me',headers=fresh).status_code,401)
+
     def test_02_drive(self):
         self.assertEqual(self.c.post('/api/folders',json={'path':'docs'}).status_code,200)
         payload=(b'super-secret-contents'*100000)+os.urandom(300)
