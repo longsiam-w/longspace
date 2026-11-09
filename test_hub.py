@@ -156,6 +156,51 @@ class HubTests(unittest.TestCase):
         self.assertEqual(self.c.get('/api/messages',headers=fresh).status_code,401)
         self.assertIsNone(s.DB.execute('SELECT 1 FROM client_token_hints WHERE client_id=?',(a['id'],)).fetchone())
 
+    def test_04c_dashboard_presence_and_history(self):
+        from unittest.mock import patch
+        a=self.register('发送端'); b=self.register('接收端')
+        ha=self.hdr(a); hb=self.hdr(b)
+        # Registration is not presence; HTTP-only clients have expiring leases.
+        self.assertNotIn(a['id'],self.c.get('/api/admin/dashboard').json()['online'])
+        self.c.get('/api/messages',headers=ha)
+        self.assertIn(a['id'],self.c.get('/api/admin/dashboard').json()['online'])
+        s.HTTP_ACTIVITY[a['id']]=s.time.monotonic()-76
+        self.assertNotIn(a['id'],self.c.get('/api/admin/dashboard').json()['online'])
+        with self.c.websocket_connect('/api/ws') as ws:
+            ws.send_json({'token':b['token']});ws.receive_json()
+            self.assertIn(b['id'],self.c.get('/api/admin/dashboard').json()['online'])
+            s.WS_ACTIVITY[b['id']]=s.time.monotonic()-76
+            self.assertNotIn(b['id'],self.c.get('/api/admin/dashboard').json()['online'])
+            ws.send_json({'type':'ping'});self.assertEqual(ws.receive_json()['type'],'pong')
+            self.assertIn(b['id'],self.c.get('/api/admin/dashboard').json()['online'])
+        self.assertNotIn(b['id'],self.c.get('/api/admin/dashboard').json()['online'])
+        now=s.time.time();minute=int(now//60)
+        saved=dict(s.RELAY_MINUTES)
+        try:
+            s.RELAY_MINUTES.clear()
+            s.RELAY_MINUTES.update({minute-120:9,minute-119:2,minute:3})
+            with patch.object(s.time,'time',return_value=now):
+                chart=s.relay_throughput()
+                self.assertEqual(len(chart['buckets']),120)
+                self.assertEqual(sum(x['count'] for x in chart['buckets']),5)
+                self.assertNotIn(minute-120,s.RELAY_MINUTES)
+            request={'recipient':b['id'],'body':'tiny','clientMessageId':'dashboard-probe'}
+            self.c.post('/api/messages',headers=ha,json=request)
+            self.c.post('/api/messages',headers=ha,json=request)
+            for _ in range(105):s.event('dashboard_probe')
+            chart=self.c.get('/api/admin/dashboard').json()['throughput']
+            self.assertEqual(sum(x['count'] for x in chart['buckets']),6)
+            self.c.post('/api/messages',headers=ha,json={**request,'clientMessageId':'dashboard-name'})
+            self.c.delete('/api/admin/software/'+a['id'])
+            d=self.c.get('/api/admin/dashboard').json()
+            e=next(e for e in d['events'] if e['kind']=='relay')
+            self.assertEqual(e['senderName'],'发送端');self.assertEqual(e['recipientName'],'接收端')
+            self.c.get('/api/messages',headers=hb)
+            self.c.post('/api/admin/software/'+b['id']+'/token')
+            self.assertNotIn(b['id'],self.c.get('/api/admin/dashboard').json()['online'])
+        finally:
+            s.RELAY_MINUTES.clear();s.RELAY_MINUTES.update(saved)
+
     def test_05_revocation_and_security(self):
         a=self.register('<script>alert(1)</script>')
         self.assertEqual(self.c.get('/api/software').status_code,200)

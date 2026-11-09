@@ -33,3 +33,5 @@ SDK 新增15秒请求超时、心跳失联检测、幂等connect、连接代际�
 
 新增业务统一使用body.kind的data/event/command/result，完整约束见SKILL.md。SDK新增createBusiness、validateBusiness、sendBusiness，必须一并保存business-protocol.mjs；服务端需要integration/business_protocol.py。服务端对声明longs-app的明文校验，不更改旧JSON。加密内容须解密后校验。截图只传附件引用，不往65536字节消息体塞入图片，现已增加软件token附件API，详见SKILL的临时附件通道。具体链路及验收见项目根目录《业务消息协议与截图链路.md》。
 附件Node客户端：attachment-client.mjs，单独导入，不用于浏览器。上传返回元信息后通过sendBusiness传assetId/size/sha256/mime；接收保存后complete删除服务器文件。不要在消息ACK时直接删图片。
+
+在线判定：软件凭据认证成功的 HTTP 请求（例如发送、pull、ACK）或当前已认证 WSS 连接的 auth/ping/ACK 活动，在最近75秒内计为在线；建议每25秒心跳或轮询。仅登记软件不算在线。WS 正常断开后该连接不再计入，但近期 HTTP 活动仍可使软件在线。轮换 Token/注销立即清除活动状态。在线只表示近期通信，不代表业务健康或任务完成。仪表盘吞吐按分钟聚合最近2小时（含当前分钟），仅统计新入队消息，幂等重试不重复计数；服务重启清空。

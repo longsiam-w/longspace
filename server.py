@@ -43,6 +43,23 @@ START = time.time(); UPLOADING = set(); RESERVED = 0
 RECEIPT_TTL = 7 * 86400
 PUSH_PENDING = set(); PUSH_TASKS = set(); PUSH_WAKE = asyncio.Event()
 PUSH_WORKERS = 2
+ONLINE_TTL = 75
+HTTP_ACTIVITY = {}; WS_ACTIVITY = {}; RELAY_MINUTES = {}
+
+def online_ids():
+    now = time.monotonic()
+    registered = {r[0] for r in DB.execute("SELECT id FROM clients")}
+    for cid, seen in list(HTTP_ACTIVITY.items()):
+        if cid not in registered or now-seen >= ONLINE_TTL: HTTP_ACTIVITY.pop(cid, None)
+    return sorted(cid for cid in registered if cid in HTTP_ACTIVITY or
+                  (cid in SOCKETS and now-WS_ACTIVITY.get(cid, float("-inf")) < ONLINE_TTL))
+
+def relay_throughput():
+    minute = int(time.time()//60)
+    for old in list(RELAY_MINUTES):
+        if old < minute-119: RELAY_MINUTES.pop(old, None)
+    return {"windowSeconds":7200,"bucketSeconds":60,"buckets":[
+        {"start":m*60,"count":RELAY_MINUTES.get(m,0)} for m in range(minute-119,minute+1)]}
 
 def notify_recipient(cid):
     # Coalesce per recipient; offline messages are read on the next connection.
@@ -96,7 +113,10 @@ def client_auth(token):
     row = DB.execute('SELECT id,name FROM clients WHERE token_hash=?', (digest(token),)).fetchone()
     if not row: err(401, '无效的软件凭据')
     return dict(row)
-def client(request): return client_auth(request.headers.get('authorization', '').removeprefix('Bearer '))
+def client(request):
+    who = client_auth(request.headers.get('authorization', '').removeprefix('Bearer '))
+    HTTP_ACTIVITY[who['id']] = time.monotonic()
+    return who
 def clean_path(value):
     if not isinstance(value, str) or '\\' in value or '\x00' in value or len(value) > 1024: err(400, '非法路径')
     value = value.strip('/')
@@ -106,7 +126,17 @@ def clean_path(value):
 def parent_exists(path):
     p = str(PurePosixPath(path).parent)
     if p != '.' and not DB.execute("SELECT 1 FROM files WHERE path=? AND kind='folder'", (p,)).fetchone(): err(400, '父文件夹不存在')
-def event(kind, **kw): EVENTS.appendleft({'time': time.time(), 'kind': kind, **kw}); COUNTS[kind] += 1
+def event(kind, **kw):
+    now = time.time()
+    for field in ('sender', 'recipient'):
+        if field in kw:
+            row = DB.execute('SELECT name FROM clients WHERE id=?', (kw[field],)).fetchone()
+            kw[field+'Name'] = row['name'] if row else '已注销软件'
+    EVENTS.appendleft({'time': now, 'kind': kind, **kw}); COUNTS[kind] += 1
+    if kind == 'relay':
+        relay_throughput()
+        minute = int(now//60)
+        RELAY_MINUTES[minute] = RELAY_MINUTES.get(minute, 0)+1
 
 def pending(cid):
     result = []
@@ -123,7 +153,8 @@ async def flush(cid):
                 await asyncio.wait_for(ws.send_json({'type': 'sync', 'messages': pending(cid)}), 10)
             except Exception:
                 event('push_error', recipient=cid)
-                if SOCKETS.get(cid) is ws: SOCKETS.pop(cid, None)
+                if SOCKETS.get(cid) is ws:
+                    SOCKETS.pop(cid, None); WS_ACTIVITY.pop(cid, None)
                 try: await asyncio.wait_for(ws.close(code=1011), 1)
                 except Exception: pass
 
@@ -224,6 +255,7 @@ async def rotate_token(cid: str, request: Request):
         DB.execute('INSERT OR REPLACE INTO client_token_hints VALUES(?,?)', (cid,token[-3:]))
     # Detach before awaiting close: old sockets cannot continue ACKing or receiving.
     ws = SOCKETS.pop(cid, None)
+    HTTP_ACTIVITY.pop(cid, None); WS_ACTIVITY.pop(cid, None)
     PUSH_PENDING.discard(cid)
     if ws:
         try: await asyncio.wait_for(ws.close(code=4003, reason='Token已重新分配'), 2)
@@ -243,6 +275,7 @@ async def revoke(cid: str, request: Request):
         DB.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', ('registry_version', str(time.time_ns())))
     revoke_attachments(cid)
     ws = SOCKETS.pop(cid, None)
+    HTTP_ACTIVITY.pop(cid, None); WS_ACTIVITY.pop(cid, None)
     if ws:
         try: await asyncio.wait_for(ws.close(code=4003), 2)
         except Exception: pass
@@ -500,12 +533,13 @@ async def websocket(ws: WebSocket):
         cid = who['id']
         old = SOCKETS.get(cid)
         SOCKETS[cid] = ws
+        WS_ACTIVITY[cid] = time.monotonic()
         if old:
             try: await asyncio.wait_for(old.close(code=4001, reason='同软件新连接已替代旧连接'), 2)
             except Exception: pass
         notify_recipient(cid)
         while True:
-            text = await asyncio.wait_for(ws.receive_text(), 90)
+            text = await asyncio.wait_for(ws.receive_text(), ONLINE_TTL)
             if len(text) > 4096: break
             packet = json.loads(text)
             if not isinstance(packet, dict):
@@ -513,6 +547,7 @@ async def websocket(ws: WebSocket):
             # A replaced or revoked connection cannot process queued ACK frames.
             if SOCKETS.get(cid) is not ws or not DB.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
                 await ws.close(code=4003); return
+            if packet.get('type') in ('ack', 'ping'): WS_ACTIVITY[cid] = time.monotonic()
             if packet.get('type') == 'ack':
                 mid = packet.get('id')
                 if isinstance(mid, str):
@@ -521,14 +556,15 @@ async def websocket(ws: WebSocket):
                 async with LOCKS.setdefault(cid, asyncio.Lock()): await asyncio.wait_for(ws.send_json({'type':'pong'}), 10)
     except (WebSocketDisconnect, asyncio.TimeoutError, HTTPException, ValueError, AttributeError, RuntimeError): pass
     finally:
-        if cid and SOCKETS.get(cid) is ws: SOCKETS.pop(cid, None)
+        if cid and SOCKETS.get(cid) is ws:
+            SOCKETS.pop(cid, None); WS_ACTIVITY.pop(cid, None)
         try: await ws.close()
         except Exception: pass
 
 @app.get('/api/admin/dashboard')
 async def dashboard(request: Request):
     session(request)
-    return {'uptime': int(time.time()-START), 'counters': dict(COUNTS), 'online': list(SOCKETS), 'events': list(EVENTS), 'pending': [dict(r) for r in DB.execute('SELECT id,sender,recipient,created FROM queue ORDER BY seq')], 'software': [dict(r) for r in DB.execute('SELECT c.id,c.name,h.suffix AS token_suffix FROM clients c LEFT JOIN client_token_hints h ON h.client_id=c.id ORDER BY c.id')], 'queueLimit': 10}
+    return {'uptime': int(time.time()-START), 'counters': dict(COUNTS), 'online': online_ids(), 'onlineTimeoutSeconds': ONLINE_TTL, 'throughput': relay_throughput(), 'events': list(EVENTS), 'pending': [dict(r) for r in DB.execute('SELECT id,sender,recipient,created FROM queue ORDER BY seq')], 'software': [dict(r) for r in DB.execute('SELECT c.id,c.name,h.suffix AS token_suffix FROM clients c LEFT JOIN client_token_hints h ON h.client_id=c.id ORDER BY c.id')], 'queueLimit': 10}
 
 def small_resource(path, media_type=None):
     # Avoid FileResponse/sendfile path for tiny UI resources: explicit bytes + length.

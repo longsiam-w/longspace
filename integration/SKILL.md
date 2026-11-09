@@ -19,7 +19,7 @@ description: 接入 LONGS云消息转发，按 longs-app v1 区分数据、事�
 - 幂等记录未ACK保留，ACK后保留7天，每发送方最多10000条；满时429，超过保留期不能假设幂等。注销软件删除相关记录。
 - `GET /api/messages`：拉取本人未ACK消息；`POST /api/messages/{id}/ack`：本人确认接管后删除，幂等。ACK不等于业务执行成功。
 - 收到的外层消息为 `{type:"message",id,sender,recipient,body,created}`，created为Unix秒。不要把外层type改成command；业务类型在body.kind。
-- WSS `/api/ws`：10秒内首帧 `{type:"auth",token:"..."}`。服务端 `{type:"sync",messages:[外层消息...]}` 是全部未ACK快照，会重复。每25秒ping，回pong；90秒无客户端帧断开。
+- WSS `/api/ws`：10秒内首帧 `{type:"auth",token:"..."}`。服务端 `{type:"sync",messages:[外层消息...]}` 是全部未ACK快照，会重复。每25秒ping，回pong；75秒无客户端帧断开。
 - 4001编号被替换、4003撤销/失效、1008协议拒绝：SDK停止重连；网络错误指数退避。连接建立默认15秒超时，HTTP默认15秒超时，可分别配置connectTimeout/requestTimeout。
 - 入队与在线推送解耦，两个固定worker合并通知；断线后重连/pull补收。必须单worker部署，不能直接增加uvicorn workers。
 
@@ -124,3 +124,5 @@ node test_relay_sdk.mjs
 - 接收任务inbox先保存可信附件元信息/目标暂存路径，任务启动时若本地已完整保存则校验后只重试complete；不能在服务器删除后又无条件重新下载。导入笔记的成功回执与下载确认分开，导入失败可从本地暂存区重试。
 - 不把token写进URL，不把图片base64放消息。名称等query不含凭据但可能进入访问日志，避免敏感文件名。mime是声明值，接收方必须验证实际格式，不执行HTML/脚本附件。默认上传时服务端限2个活动上传。
 - 过期和确认删除是逻辑/文件删除，不承诺SSD/快照物理擦除。单机SQLite+文件不是跨资源原子事务，通过.part/原子重命名/墓碑/启动清理恢复孤儿文件。
+
+在线判定：软件凭据认证成功的 HTTP 请求（例如发送、pull、ACK）或当前已认证 WSS 连接的 auth/ping/ACK 活动，在最近75秒内计为在线；建议每25秒心跳或轮询。仅登记软件不算在线。WS 正常断开后该连接不再计入，但近期 HTTP 活动仍可使软件在线。轮换 Token/注销立即清除活动状态。在线只表示近期通信，不代表业务健康或任务完成。仪表盘吞吐按分钟聚合最近2小时（含当前分钟），仅统计新入队消息，幂等重试不重复计数；服务重启清空。
